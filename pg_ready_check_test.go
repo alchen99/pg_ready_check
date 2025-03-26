@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"reflect"
@@ -137,15 +138,14 @@ func TestGetEnvOrDefaultInt(t *testing.T) {
 				os.Setenv(tc.key, tc.envVarValue)
 			}
 			result := getEnvOrDefaultInt(tc.key, tc.defaultValue)
-
-			if tc.expectError {
-				t.Errorf("Expected error, got no error")
-				t.Errorf("Expected %d, got %d", tc.expectedValue, result)
-			} else {
-				t.Errorf("Expected no error, got error")
-				t.Errorf("Expected %d, got %d", tc.expectedValue, result)
+			if result != tc.expectedValue {
+				if tc.expectError {
+					t.Fatalf("Expected error but got: %d", result)
+				}
+				t.Fatalf("Expected %d, got %d", tc.expectedValue, result)
 			}
 		})
+		os.Clearenv()
 	}
 }
 
@@ -323,13 +323,11 @@ func TestCheckTablesExist(t *testing.T) {
 		t.Fatalf("Error connecting to db table: %v", err)
 	}
 	defer db.Close(context.Background())
-
 	createTables := []string{
 		"CREATE TABLE IF NOT EXISTS test_table (id SERIAL PRIMARY KEY)",
 		"CREATE TABLE IF NOT EXISTS test_table2 (id SERIAL PRIMARY KEY)",
 		"CREATE TABLE IF NOT EXISTS test_table3 (id SERIAL PRIMARY KEY)",
 	}
-
 	for _, query := range createTables {
 		_, err = db.Exec(context.Background(), query)
 		if err != nil {
@@ -342,21 +340,14 @@ func TestCheckTablesExist(t *testing.T) {
 		"DROP TABLE IF EXISTS test_table2",
 		"DROP TABLE IF EXISTS test_table3",
 	}
-	for _, query := range dropTables {
-		_, err = db.Exec(context.Background(), query)
-	}
 	defer func() {
-		_, err := db.Exec(context.Background(), "DROP TABLE IF EXISTS test_table")
-		if err != nil {
-			t.Fatalf("Error dropping db table: %v", err)
-		}
-		_, err = db.Exec(context.Background(), "DROP TABLE IF EXISTS test_table2")
-		if err != nil {
-			t.Fatalf("Error dropping db table: %v", err)
-		}
-		_, err = db.Exec(context.Background(), "DROP TABLE IF EXISTS test_table3")
-		if err != nil {
-			t.Fatalf("Error dropping db table: %v", err)
+		db.Close(context.Background())
+
+		for _, query := range dropTables {
+			_, err = db.Exec(context.Background(), query)
+			if err != nil {
+				t.Fatalf("Error dropping db table: %v", err)
+			}
 		}
 	}()
 
@@ -382,7 +373,6 @@ func TestCheckTablesExist(t *testing.T) {
 			expectError:   true,
 			expectedError: "table nonexistent_table does not exist",
 		},
-
 		{
 			name:          "No tables exist",
 			tableList:     []string{"nonexistent_table1", "nonexistent_table2"},
@@ -443,7 +433,8 @@ func TestCheckTablesExist(t *testing.T) {
 					t.Errorf("Expected error message '%s', got '%s'", tc.expectedError, err.Error())
 				}
 			} else {
-				if len(missing) != tc.expectedMissing {
+				if len(missing) != tc.expectedMissing && !errors.Is(err, pgx.ErrNoRows) {
+					t.Fatalf("Expected missing table count %d, but got %d and err: %v", tc.expectedMissing, len(missing), err)
 				}
 				if err != nil {
 					t.Errorf("Expected no error, got %v", err)
